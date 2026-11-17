@@ -165,6 +165,7 @@ svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-widt
 .btn-call svg.i{width:19px;height:19px}
 .mini{flex:none;align-self:center;padding:8px 12px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-size:14px;font-weight:700;text-decoration:none}
 .qty{font-weight:700;white-space:nowrap}
+.pled-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}.pled{background:var(--card,#fff);border-radius:16px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.pled h3{margin:0 0 8px;font-size:15px}.pled table{width:100%;border-collapse:collapse;font-size:14px}.pled th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;opacity:.6;text-align:right;padding:4px 4px}.pled th:first-child,.pled td:first-child{text-align:left}.pled td{text-align:right;padding:6px 4px;border-top:1px solid rgba(0,0,0,.07)}.pled td.ok{color:#0f8a4b}.pled td.no{color:#c4202b}.pled tfoot td{font-weight:700;border-top:2px solid rgba(0,0,0,.15)}
 .perf{position:relative;margin:16px -16px 14px;border-top:2px dashed var(--line)}
 .perf::before,.perf::after{content:"";position:absolute;top:-10px;width:18px;height:18px;border-radius:50%;background:var(--desk)}
 .perf::before{left:-9px}.perf::after{right:-9px}
@@ -2944,7 +2945,28 @@ function adminCouriers() {
       <div class="rline"><span>Kuryerlar ulushi</span><span class="lead"></span><b>${smoney(fs.share)} soʻm</b></div>
       <div class="rline"><span>Xizmat ulushi</span><span class="lead"></span><b>${smoney(fs.office)} soʻm</b></div>
       <div class="rline"><span>Kompaniyalarga</span><span class="lead"></span><b>${smoney(fs.company)} soʻm</b></div>` : ''}
-    </section>${groups || '<div class="empty"><p>Kuryer yoʻq. Sozlamalar boʻlimidan qoʻshing.</p></div>'}`;
+    </section>${groups || '<div class="empty"><p>Kuryer yoʻq. Sozlamalar boʻlimidan qoʻshing.</p></div>'}${productLedger()}`;
+}
+function productLedger() {
+  const rows = new Map();
+  for (const o of S.orders.values()) {
+    if (!o.courier) continue;
+    let st = null;
+    if (o.status === 'assigned' || o.status === 'on_way') st = 'hand';
+    else if (o.status === 'delivered' && isToday(o.done_at)) st = 'ok';
+    else if (o.status === 'cancelled' && isToday(o.done_at)) st = 'no';
+    if (!st) continue;
+    let m = rows.get(o.courier); if (!m) rows.set(o.courier, m = new Map());
+    for (const it of itemsOf(o)) { const k = pkey(it.n); let x = m.get(k); if (!x) m.set(k, x = { n: it.n, hand: 0, ok: 0, no: 0 }); x[st] += it.q; }
+  }
+  const cs = S.users.filter(u => u.role === 'courier' && rows.has(u.code));
+  if (!cs.length) return '';
+  const cards = cs.map(c => {
+    const list = [...rows.get(c.code).values()].sort((a, b) => a.n.localeCompare(b.n));
+    const t = list.reduce((s, x) => ({ g: s.g + x.hand + x.ok + x.no, ok: s.ok + x.ok, no: s.no + x.no, hand: s.hand + x.hand }), { g: 0, ok: 0, no: 0, hand: 0 });
+    return `<div class="pled"><h3>${esc(c.code)}</h3><table><thead><tr><th>Mahsulot</th><th>Olgan</th><th>Topshirdi</th><th>Bekor</th><th>Qoʻlida</th></tr></thead><tbody>${list.map(x => `<tr><td>${esc(x.n)}</td><td>${x.hand + x.ok + x.no}</td><td class="ok">${x.ok}</td><td class="no">${x.no}</td><td><b>${x.hand}</b></td></tr>`).join('')}</tbody><tfoot><tr><td>Jami</td><td>${t.g}</td><td class="ok">${t.ok}</td><td class="no">${t.no}</td><td><b>${t.hand}</b></td></tr></tfoot></table></div>`;
+  }).join('');
+  return `<section class="cgroup"><h2 class="h2">Mahsulot hisobi</h2><p class="muted" style="margin:0 0 10px;font-size:13px">Olgan = qoʻlida + bugun topshirgan + bugun bekor qilgan. Bekor qilingan mahsulot skladga qaytadi.</p><div class="pled-grid">${cards}</div></section>`;
 }
 const histText = (e, o) => ({
   assigned: `${e.courier} kuryerga berildi`, unassigned: 'Kuryerdan qaytarib olindi', on_way: `${e.courier} yoʻlga chiqdi`,
