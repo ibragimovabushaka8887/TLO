@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null && request.auth.token.email != null; }
+    function isStaff() { return signedIn() && exists(/databases/$(database)/documents/staff/$(request.auth.token.email)); }
+    function isAdmin() { return isStaff() && get(/databases/$(database)/documents/staff/$(request.auth.token.email)).data.role in ['admin', 'super']; }
+    function fresh() { return !exists(/databases/$(database)/documents/meta/main); }
+
+    // login -> hisob manzili (faqat bitta hujjatni oʻqish mumkin, roʻyxat yoʻq)
+    match /loginmap/{code} {
+      allow get: if true;
+      allow create: if isAdmin() || (signedIn() && fresh());
+      allow update, delete: if isAdmin();
+    }
+    // kim ishchi ekani va roli
+    match /staff/{email} {
+      allow get: if signedIn() && (request.auth.token.email == email || isAdmin());
+      allow create: if isAdmin() || (signedIn() && fresh() && request.auth.token.email == email);
+      allow update, delete: if isAdmin();
+    }
+    // foydalanuvchilar roʻyxati va sozlamalar
+    match /meta/{doc} {
+      allow read: if isStaff();
+      allow create: if signedIn() && fresh();
+      allow update: if isAdmin();
+    }
+    // buyurtmalar, hodisalar, chat, ombor
+    match /orders/{doc}  { allow read, write: if isStaff(); }
+    match /events/{doc}  { allow read, write: if isStaff(); }
+    match /chat/{doc}    { allow read, write: if isStaff(); }
+    match /stock/{doc}   { allow read, write: if isStaff(); }
+    // karta toʻlovi chek rasmlari
+    match /receipts/{doc} { allow read, write: if isStaff(); }
+  }
+}

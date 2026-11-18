@@ -165,6 +165,7 @@ svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-widt
 .btn-call svg.i{width:19px;height:19px}
 .mini{flex:none;align-self:center;padding:8px 12px;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-size:14px;font-weight:700;text-decoration:none}
 .qty{font-weight:700;white-space:nowrap}
+.rcpt-box{margin:10px 0}.rcpt-prev{width:100%;max-height:260px;object-fit:contain;border-radius:12px;background:var(--desk);display:block;margin-top:8px}.rcpt-img{width:100%;border-radius:12px;display:block;background:var(--desk)}.rcpt-pick{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;border-radius:14px;border:2px dashed var(--line);font-weight:700;cursor:pointer}.rcpt-pick input{display:none}
 .pled-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}.pled{background:var(--card,#fff);border-radius:16px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}.pled h3{margin:0 0 8px;font-size:15px}.pled table{width:100%;border-collapse:collapse;font-size:14px}.pled th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;opacity:.6;text-align:right;padding:4px 4px}.pled th:first-child,.pled td:first-child{text-align:left}.pled td{text-align:right;padding:6px 4px;border-top:1px solid rgba(0,0,0,.07)}.pled td.ok{color:#0f8a4b}.pled td.no{color:#c4202b}.pled tfoot td{font-weight:700;border-top:2px solid rgba(0,0,0,.15)}
 .perf{position:relative;margin:16px -16px 14px;border-top:2px dashed var(--line)}
 .perf::before,.perf::after{content:"";position:absolute;top:-10px;width:18px;height:18px;border-radius:50%;background:var(--desk)}
@@ -2021,6 +2022,15 @@ const fbWrap = name => async (...a) => {
 };
 const fb = {};
 for (const k of Object.keys(fbEngine)) if (!['login', 'me', 'logout', 'reset', 'accounts'].includes(k)) fb[k] = fbWrap(k);
+fb.receiptSave = async (t, id, data) => {
+  await fbEnsure();
+  await FB.m.setDoc(FB.m.doc(FB.fs, 'receipts', String(id)), { d: data, by: FB.sess || '', at: new Date().toISOString() });
+};
+fb.receiptGet = async (t, id) => {
+  await fbEnsure();
+  const s = await FB.m.getDoc(FB.m.doc(FB.fs, 'receipts', String(id)));
+  return s.exists() ? s.data() : null;
+};
 fb.login = async (code, pass) => {
   code = normCode(code);
   try {
@@ -3197,6 +3207,47 @@ function courierPick(act, currentCode, extra = '') {
     `<button class="chip ${currentCode === c.code ? 'on' : ''}" data-act="${act}" data-code="${esc(c.code)}" ${extra}>${esc(c.code)}<em>${courierStats(c.code).active} faol</em></button>`).join('')}</div></div>`).join('');
 }
 const addedText = o => o.src === 'manual' ? 'Qoʻlda kiritildi' : o.src === 'excel' ? 'Exceldan yuklandi' : 'Roʻyxatga qoʻshildi';
+/* ---------- chek rasmi (karta toʻlov): suratga olinadi, kichraytirilib bazaga yoziladi ---------- */
+function rcptShrink(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onerror = () => rej(new Error('read'));
+    r.onload = () => {
+      const im = new Image();
+      im.onerror = () => rej(new Error('img'));
+      im.onload = () => {
+        const M = 1100, k = Math.min(1, M / Math.max(im.width, im.height));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+        res(c.toDataURL('image/jpeg', 0.6));
+      };
+      im.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+document.addEventListener('change', async e => {
+  const t = e.target;
+  if (!t || t.id !== 'dl-file') return;
+  const f = t.files && t.files[0], pv = $('#dl-prev'), lb = $('#dl-pick-t');
+  S.rcptData = null;
+  if (!f) { if (pv) pv.hidden = true; return; }
+  try {
+    S.rcptData = await rcptShrink(f);
+    if (pv) { pv.src = S.rcptData; pv.hidden = false; }
+    if (lb) lb.textContent = 'Chekni almashtirish';
+  } catch (er) { toast('Rasmni oʻqib boʻlmadi. Qayta urinib koʻring.', 'no'); }
+});
+const rcptSave = (id, d) => api.receiptSave ? api.receiptSave(S.sess.token, id, d) : Promise.resolve();
+async function showReceipt(o) {
+  const box = $('#rcptBox'); if (!box || !api.receiptGet) return;
+  try {
+    const r = await api.receiptGet(S.sess.token, o.id), b2 = $('#rcptBox');
+    if (!b2) return;
+    b2.innerHTML = r && r.d ? `<h3 class="h3">Chek rasmi</h3><img class="rcpt-img" alt="Chek" src="${esc(r.d)}"><p class="hint">Yuklagan: ${esc(r.by || '')}, ${esc(when(r.at))}</p>` : `<h3 class="h3">Chek rasmi</h3><p class="hint">Kuryer chek yuklamagan.</p>`;
+  } catch (er) { const b2 = $('#rcptBox'); if (b2) b2.innerHTML = '<p class="hint">Chekni yuklab boʻlmadi.</p>'; }
+}
 async function openOrder(id) {
   const o = S.orders.get(+id);
   if (!o) { toast('Bu buyurtma roʻyxatda yoʻq: eski yoki oʻchirilgan.'); return; }
@@ -3206,6 +3257,7 @@ async function openOrder(id) {
       <div class="slip-top"><span class="ono">${o.order_no ? '№ ' + esc(o.order_no) : 'Buyurtma'}</span><span class="st ${stOf(o.status).cls}">${stOf(o.status).label}${o.courier ? ' · ' + esc(o.courier) : ''}</span></div>
       ${slipBody(o)}${outcome(o)}${feeBox(o, false)}
     </article>
+    <div id="rcptBox"></div>
     <div class="sh-acts"><button class="btn btn-ghost" data-act="edit-order" data-id="${o.id}">${ico('edit')}Tahrirlash</button>
       ${o.status === 'delivered' || o.status === 'cancelled' ? `<button class="btn btn-ghost" data-act="revert" data-id="${o.id}">${ico('undo')}Avvalgiga qaytarish</button>` : ''}</div>
     ${o.status !== 'delivered' ? `<h3 class="h3">${o.courier ? 'Boshqa kuryerga berish' : 'Kuryerga berish'}</h3>${courierPick('assign-one', o.courier, `data-id="${o.id}"`)}
@@ -3213,6 +3265,7 @@ async function openOrder(id) {
     ${commentsSection(o)}
     <h3 class="h3">Tarix</h3><ol class="timeline" id="tl"><li><time>${esc(when(o.created_at))}</time>${addedText(o)}</li><li class="muted">Yuklanmoqda…</li></ol>
     <button class="btn btn-no btn-block" data-act="del-one" data-id="${o.id}">Buyurtmani oʻchirish</button>`, { label: 'Buyurtma' });
+  if (o.status === 'delivered' && ['card', 'mixed'].includes(o.pay_method)) showReceipt(o);
   try {
     const h = await api.history(S.sess.token, o.id);
     const tl = sheet.querySelector('#tl');
@@ -3399,7 +3452,7 @@ function openAuto() {
 }
 function openDeliver(id) {
   const o = S.orders.get(id); if (!o) return;
-  S.payPick = null;
+  S.payPick = null; S.rcptData = null;
   const paid = +o.amount > 0, unk = o.amount == null;
   openSheet(`<h2 class="sh-title">Buyurtmani topshirish</h2>
     <p class="sh-text">${o.customer ? esc(o.customer) + '. ' : ''}${paid ? `Mijozdan <b>${money(o.amount)} soʻm</b> olinadi.` : unk ? 'Summa koʻrsatilmagan.' : 'Toʻlov olinmaydi.'}</p>
@@ -3408,6 +3461,7 @@ function openDeliver(id) {
     ${paid ? `<div class="fld mix-box" id="dl-mix" hidden><span>Kartaga oʻtkazilgan summa, soʻm</span>
       <input id="dl-card" inputmode="numeric" autocomplete="off" placeholder="masalan, ${money(Math.round(+o.amount / 2 / 1000) * 1000)}" data-amt="${+o.amount}">
       <p class="hint" id="dl-mix-hint">Qolgani naqd hisoblanadi.</p></div>` : ''}
+    <div class="fld rcpt-box" id="dl-rc" hidden><span>Chek rasmi (ixtiyoriy, lekin yaxshi)</span><label class="rcpt-pick"><input type="file" id="dl-file" accept="image/*" capture="environment"><span id="dl-pick-t">Chekni suratga olish</span></label><img id="dl-prev" class="rcpt-prev" alt="" hidden></div>
     <label class="fld"><span>Izoh (ixtiyoriy)</span><textarea id="dl-note" rows="2" placeholder="Masalan: qoʻshnisiga topshirildi"></textarea></label>
     <p class="form-err" id="dl-err" role="alert"></p>
     <div class="btn-col"><button class="btn btn-ok btn-block" data-act="do-ok" data-id="${o.id}">${ico('check')}Topshirdim</button><button class="btn btn-ghost btn-block" data-act="sheet-close">Orqaga</button></div>`, { label: 'Topshirish' });
@@ -4431,10 +4485,12 @@ function onErr(e, quiet) {
 /* ---------------- kuryer amallari ---------------- */
 async function courierSet(id, status, reason = null, note = '', pay = null, payCard = null) {
   if (S.busy.has(id)) return;
+  const rd = status === 'delivered' && ['card', 'mixed'].includes(pay) ? S.rcptData : null; S.rcptData = null;
   S.busy.add(id); render();
   try {
     const o = await api.setStatus(S.sess.token, id, status, reason, note || null, pay, payCard);
     S.orders.set(o.id, o);
+    if (rd) { try { await rcptSave(o.id, rd); } catch (er) { toast('Chek rasmi yuborilmadi. Adminga ayting.', 'no'); } }
     if (status !== 'on_way') {
       S.landed = o.id; S.landFresh = true;
       clearTimeout(S.landT);
@@ -4612,6 +4668,7 @@ const ACT = {
     const e = $('#dl-err'); if (e) e.textContent = '';
     const mix = $('#dl-mix');
     if (mix) { mix.hidden = S.payPick !== 'mixed'; if (!mix.hidden) { const i = $('#dl-card'); if (i) i.focus(); } }
+    const rc = $('#dl-rc'); if (rc) rc.hidden = !['card', 'mixed'].includes(S.payPick);
   },
   'do-ok': async el => {
     const id = +el.dataset.id, o = S.orders.get(id); if (!o) return;
